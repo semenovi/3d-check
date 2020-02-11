@@ -1,2 +1,2 @@
-# gpu_quicksort
-OpenCL/AMD
+# GPU Quicksort
+OpenCL, AMD
