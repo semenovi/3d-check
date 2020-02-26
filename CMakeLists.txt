@@ -1,8 +1,51 @@
 cmake_minimum_required(VERSION 3.8)
 
-# Project name
-project(gpu_sort LANGUAGES CSharp)
+set(PROJECT_NAME OpenCL)
 
-add_subdirectory(OpenCL)
-add_subdirectory(OpenCLlib)
-set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT OpenCL)
+project(${PROJECT_NAME})
+
+set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
+find_package(OpenCL REQUIRED)
+
+FIND_PATH(OPENCL_INCLUDE_DIRS CL/cl.h)
+FIND_PATH(_OPENCL_CPP_INCLUDE_DIRS CL/cl.hpp)
+
+# The AMD SDK currently installs both x86 and x86_64 libraries
+# This is only a hack to find out architecture
+IF( ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64" )
+	SET(OPENCL_LIB_DIR "$ENV{ATISTREAMSDKROOT}/lib/x86_64")
+	SET(OPENCL_LIB_DIR "$ENV{ATIINTERNALSTREAMSDKROOT}/lib/x86_64")
+ELSE (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64")
+	SET(OPENCL_LIB_DIR "$ENV{ATISTREAMSDKROOT}/lib/x86")
+	SET(OPENCL_LIB_DIR "$ENV{ATIINTERNALSTREAMSDKROOT}/lib/x86")
+ENDIF( ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64" )
+
+# find out if the user asked for a 64-bit build, and use the corresponding 
+# 64 or 32 bit NVIDIA library paths to the search:
+STRING(REGEX MATCH "Win64" ISWIN64 ${CMAKE_GENERATOR})
+IF("${ISWIN64}" STREQUAL "Win64") 
+	FIND_LIBRARY(OPENCL_LIBRARIES OpenCL.lib $ENV{CUDA_PATH}/lib/x64 ${OPENCL_LIB_DIR} )
+ELSE("${ISWIN64}" STREQUAL "Win64") 
+	FIND_LIBRARY(OPENCL_LIBRARIES OpenCL.lib $ENV{CUDA_PATH}/lib/Win32 ${OPENCL_LIB_DIR} )
+ENDIF("${ISWIN64}" STREQUAL "Win64") 
+
+GET_FILENAME_COMPONENT(_OPENCL_INC_CAND ${OPENCL_LIB_DIR}/../../include ABSOLUTE)
+
+# On Win32 search relative to the library
+FIND_PATH(OPENCL_INCLUDE_DIRS CL/cl.h PATHS "${_OPENCL_INC_CAND}" $ENV{CUDA_INC_PATH} $ENV{CUDA_PATH}/include)
+FIND_PATH(_OPENCL_CPP_INCLUDE_DIRS CL/cl.hpp PATHS "${_OPENCL_INC_CAND}" $ENV{CUDA_INC_PATH} $ENV{CUDA_PATH}/include)
+
+set(TARGET_SRC
+	HelloWorld.cpp
+	)
+
+add_executable(${PROJECT_NAME} ${TARGET_SRC})
+target_link_libraries(${PROJECT_NAME} ${OPENCL_LIBRARIES})
+
+include_directories(${OPENCL_INCLUDE_DIRS})
+include_directories("${CMAKE_SOURCE_DIR}/khronos")
+
+configure_file(HelloWorld.cl ${CMAKE_CURRENT_BINARY_DIR}/HelloWorld.cl COPYONLY)
+
+set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
