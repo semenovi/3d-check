@@ -28,6 +28,34 @@
 //
 const int ARRAY_SIZE = 1000;
 
+const unsigned int ii = 8;
+const unsigned int jj = 8;
+const unsigned int kk = 1;
+
+cl_uint g[ii][jj] =
+{
+    {3, 1, 1, 4, 8, 2, 1, 3},
+    {4, 2, 1, 1, 2, 1, 2, 3},
+    {4, 4, 4, 4, 3, 2, 2, 2},
+    {9, 8, 3, 8, 9, 0, 0, 0},
+    {9, 3, 3, 9, 0, 0, 0, 0},
+    {0, 9, 0, 8, 0, 0, 0, 0},
+    {3, 0, 8, 8, 9, 4, 4, 4},
+    {5, 9, 8, 1, 8, 1, 1, 1}
+};
+
+
+
+void read_input(const char* fileName)
+{
+    std::ifstream input_file(fileName, std::ios::in);
+    if (!input_file.is_open())
+    {
+        std::cerr << "Failed to open file for reading: " << fileName << std::endl;
+    }
+    std::cout << input_file.getline();
+}
+
 ///
 //  Create an OpenCL context on the first available platform using
 //  either a GPU or CPU depending on what is available.
@@ -252,7 +280,7 @@ int main(int argc, char** argv)
     }
 
     // Create OpenCL program from HelloWorld.cl kernel source
-    program = CreateProgram(context, device, "HelloWorld.cl");
+    program = CreateProgram(context, device, "kernel.cl");
     if (program == NULL)
     {
         Cleanup(context, commandQueue, program, kernel, memObjects);

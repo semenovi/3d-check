@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.8)
 
-set(PROJECT_NAME OpenCL)
+set(PROJECT_NAME 3d_check)
 
 project(${PROJECT_NAME})
 
@@ -37,7 +37,7 @@ FIND_PATH(OPENCL_INCLUDE_DIRS CL/cl.h PATHS "${_OPENCL_INC_CAND}" $ENV{CUDA_INC_
 FIND_PATH(_OPENCL_CPP_INCLUDE_DIRS CL/cl.hpp PATHS "${_OPENCL_INC_CAND}" $ENV{CUDA_INC_PATH} $ENV{CUDA_PATH}/include)
 
 set(TARGET_SRC
-	HelloWorld.cpp
+	main.cpp
 	)
 
 add_executable(${PROJECT_NAME} ${TARGET_SRC})
@@ -46,6 +46,6 @@ target_link_libraries(${PROJECT_NAME} ${OPENCL_LIBRARIES})
 include_directories(${OPENCL_INCLUDE_DIRS})
 include_directories("${CMAKE_SOURCE_DIR}/khronos")
 
-configure_file(HelloWorld.cl ${CMAKE_CURRENT_BINARY_DIR}/HelloWorld.cl COPYONLY)
+configure_file(kernel.cl ${CMAKE_CURRENT_BINARY_DIR}/kernel.cl COPYONLY)
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
