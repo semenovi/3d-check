@@ -1,3 +1,3 @@
-# Sorting on GPU
+# GPU computing
 
 Study project
