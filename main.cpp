@@ -16,6 +16,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <string>
 
 #ifdef __APPLE__
 #include <OpenCL/cl.h>
@@ -28,32 +29,42 @@
 //
 const int ARRAY_SIZE = 1000;
 
-const unsigned int ii = 8;
-const unsigned int jj = 8;
-const unsigned int kk = 1;
 
-cl_uint g[ii][jj] =
+cl_int *readGraph(const char *fileName)
 {
-    {3, 1, 1, 4, 8, 2, 1, 3},
-    {4, 2, 1, 1, 2, 1, 2, 3},
-    {4, 4, 4, 4, 3, 2, 2, 2},
-    {9, 8, 3, 8, 9, 0, 0, 0},
-    {9, 3, 3, 9, 0, 0, 0, 0},
-    {0, 9, 0, 8, 0, 0, 0, 0},
-    {3, 0, 8, 8, 9, 4, 4, 4},
-    {5, 9, 8, 1, 8, 1, 1, 1}
-};
+    cl_int errNum;
+    char *currentString = new char[32];
+    std::ifstream inputFile(fileName, std::ios::in);
 
-
-
-void read_input(const char* fileName)
-{
-    std::ifstream input_file(fileName, std::ios::in);
-    if (!input_file.is_open())
+    if (!inputFile.is_open())
     {
         std::cerr << "Failed to open file for reading: " << fileName << std::endl;
+        return NULL;
     }
-    std::cout << input_file.getline();
+
+    std::ostringstream oss;
+
+    inputFile.getline(currentString, 1);
+    
+
+    cl_int* g = new cl_int[];
+
+    oss << inputFile.rdbuf();
+
+    std::string inputStdStr = oss.str();
+    const char* srcStr = inputStdStr.c_str();
+    /*
+    program = clCreateProgramWithSource(context, 1,
+        (const char**)&srcStr,
+        NULL, NULL);
+    if (program == NULL)
+    {
+        std::cerr << "Failed to create CL program from source." << std::endl;
+        return NULL;
+    }
+    */
+
+    return g;
 }
 
 ///
@@ -254,6 +265,8 @@ void Cleanup(cl_context context, cl_command_queue commandQueue,
 //
 int main(int argc, char** argv)
 {
+    readGraph("3d_model.in");
+    /*
     cl_context context = 0;
     cl_command_queue commandQueue = 0;
     cl_program program = 0;
@@ -358,6 +371,6 @@ int main(int argc, char** argv)
     std::cout << std::endl;
     std::cout << "Executed program succesfully." << std::endl;
     Cleanup(context, commandQueue, program, kernel, memObjects);
-
+    */
     return 0;
 }
