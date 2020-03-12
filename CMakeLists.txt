@@ -38,6 +38,7 @@ FIND_PATH(_OPENCL_CPP_INCLUDE_DIRS CL/cl.hpp PATHS "${_OPENCL_INC_CAND}" $ENV{CU
 
 set(TARGET_SRC
 	main.cpp
+	kernel.cl
 	)
 
 add_executable(${PROJECT_NAME} ${TARGET_SRC})

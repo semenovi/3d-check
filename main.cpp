@@ -9,13 +9,7 @@
 #include <CL/cl.h>
 #endif
 
-///
-//  Constants
-//
-const int ARRAY_SIZE = 1000;
-
-
-void write_model(std::string file_name, cl_int n, cl_int *adjacency_matrix)
+void write_model(std::string file_name, cl_int n, cl_float*adjacency_matrix)
 {
     std::ofstream output_stream(file_name, std::ios::binary);
 
@@ -32,27 +26,27 @@ void write_model(std::string file_name, cl_int n, cl_int *adjacency_matrix)
     }
 }
 
-void read_model(std::string file_name)
+cl_float *read_model(std::string file_name)
 {
     std::ifstream input_stream(file_name, std::ios::binary);
 
     if (!input_stream.is_open())
     {
         std::cerr << "Failed to open file for reading: " << file_name << std::endl;
-        return;
+        return NULL;
     }
 
     cl_int n = 0;
     input_stream >> n;
         
-    cl_int* adjacency_matrix = new cl_int[n];
+    cl_float* adjacency_matrix = new cl_float[n];
     cl_int i = 0;
     while (input_stream.good()) {
         input_stream >> adjacency_matrix[i];
         i++;
     }
     
-    return;
+    return adjacency_matrix;
 }
 
 ///
@@ -201,22 +195,23 @@ cl_program CreateProgram(cl_context context, cl_device_id device, const char* fi
 
 ///
 //  Create memory objects used as the arguments to the kernel
-//  The kernel takes three arguments: result (output), a (input),
-//  and b (input)
+//  The kernel takes three arguments: matrix_out (output), matrix_in (input)
+//  and max_length (input)
 //
-bool CreateMemObjects(cl_context context, cl_mem memObjects[3],
-                      float *a, float *b)
+bool create_mem_objects(cl_context context, cl_mem mem_objects[3],
+                        cl_float* matrix_in, cl_float* max_length, cl_int n)
 {
-    memObjects[0] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                                   sizeof(float) * ARRAY_SIZE, a, NULL);
-    memObjects[1] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                                   sizeof(float) * ARRAY_SIZE, b, NULL);
-    memObjects[2] = clCreateBuffer(context, CL_MEM_READ_WRITE,
-                                   sizeof(float) * ARRAY_SIZE, NULL, NULL);
+    cl_int size = n * n;
+    mem_objects[0] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                                    sizeof(cl_float) * size, matrix_in, NULL);
+    mem_objects[1] = clCreateBuffer(context, CL_MEM_READ_WRITE,
+                                    sizeof(cl_float) * size, NULL, NULL);
+    mem_objects[2] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                                    sizeof(cl_int), max_length, NULL);
 
-    if (memObjects[0] == NULL || memObjects[1] == NULL || memObjects[2] == NULL)
+    if (mem_objects[0] == NULL || mem_objects[1] == NULL || mem_objects[2] == NULL)
     {
-        std::cerr << "Error creating memory objects." << std::endl;
+        std::cerr << "Error creating memory objects" << std::endl;
         return false;
     }
 
@@ -227,7 +222,7 @@ bool CreateMemObjects(cl_context context, cl_mem memObjects[3],
 //  Cleanup any created OpenCL resources
 //
 void Cleanup(cl_context context, cl_command_queue commandQueue,
-             cl_program program, cl_kernel kernel, cl_mem memObjects[3])
+             cl_program program, cl_kernel kernel, cl_mem memObjects[2])
 {
     for (int i = 0; i < 3; i++)
     {
@@ -248,26 +243,155 @@ void Cleanup(cl_context context, cl_command_queue commandQueue,
 
 }
 
-///
-//	main() for HelloWorld example
-//
 int main(int argc, char** argv)
 {
+    // uncomment to write file
+    /*
     std::string input_file("3d_model.in");
-    cl_int* adjacency_matrix = new cl_int[64]
+    cl_int n = 8;
+    cl_float* adjacency_matrix = new cl_float[n * n]
     {
-            0, 3, 5, 4, 3, 4, 0, 0,
-            3, 0, 4, 0, 0, 3, 4, 0,
-            5, 4, 0, 3, 0, 0, 3, 4,
-            4, 0, 3, 0, 4, 0, 0, 3,
-            3, 0, 0, 4, 0, 3, 5, 4,
-            4, 3, 0, 0, 3, 0, 4, 0,
-            0, 4, 3, 0, 5, 4, 0, 3,
-            0, 0, 4, 3, 4, 0, 3, 0
+            0.0, 3.0, 5.0, 4.0, 3.0, 4.0, 0.0, 0.0,
+            3.0, 0.0, 4.0, 0.0, 0.0, 3.0, 4.0, 0.0,
+            5.0, 4.0, 0.0, 3.0, 0.0, 0.0, 3.0, 4.0,
+            4.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 3.0,
+            3.0, 0.0, 0.0, 4.0, 0.0, 3.0, 5.0, 4.0,
+            4.0, 3.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0,
+            0.0, 4.0, 3.0, 0.0, 5.0, 4.0, 0.0, 3.0,
+            0.0, 0.0, 4.0, 3.0, 4.0, 0.0, 3.0, 0.0
     };
-    write_model("3d_model.in", 64, adjacency_matrix);
+    write_model("3d_model.in", n * n, adjacency_matrix);
+    */
+
+    // uncomment to execute
     
-    read_model("3d_model.in");
+    cl_context context = 0;
+    cl_command_queue commandQueue = 0;
+    cl_program program = 0;
+    cl_device_id device = 0;
+    cl_kernel kernel = 0;
+    cl_mem mem_objects[3] = { 0, 0, 0 };
+    cl_int errNum;
+
+    // Create an OpenCL context on first available platform
+    context = CreateContext();
+    if (context == NULL)
+    {
+        std::cerr << "Failed to create OpenCL context." << std::endl;
+        return 1;
+    }
+
+    // Create a command-queue on the first device available
+    // on the created context
+    commandQueue = CreateCommandQueue(context, &device);
+    if (commandQueue == NULL)
+    {
+        Cleanup(context, commandQueue, program, kernel, mem_objects);
+        return 1;
+    }
+
+    // Create OpenCL program from kernel.cl kernel source
+    program = CreateProgram(context, device, "kernel.cl");
+    if (program == NULL)
+    {
+        Cleanup(context, commandQueue, program, kernel, mem_objects);
+        return 1;
+    }
+
+    // Create OpenCL kernel
+    kernel = clCreateKernel(program, "shorter_than", NULL);
+    if (kernel == NULL)
+    {
+        std::cerr << "Failed to create kernel" << std::endl;
+        Cleanup(context, commandQueue, program, kernel, mem_objects);
+        return 1;
+    }
+
+    // Create memory objects that will be used as arguments to
+    // kernel.  First create host memory arrays that will be
+    // used to store the arguments to the kernel
+    
+    cl_int n = 8;
+    cl_float* adjacency_matrix = new cl_float[n * n];
+    adjacency_matrix = read_model("3d_model.in");
+    cl_float* matrix_out = new cl_float[n * n];
+
+
+    // Write input
+    std::cout << "Input adjacency matrix:" << std::endl;
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            std::cout << adjacency_matrix[i * n + j] << " ";
+        }
+        std::cout << std::endl;
+    }
+    std::cout << std::endl;
+
+    // Ask the max_length
+    cl_float max_length = 0.0;
+    std::cout << "Enter max_length:" << std::endl << "> ";
+    std::cin >> max_length;
+    std::cout << std::endl;
+
+    if (!create_mem_objects(context, mem_objects, adjacency_matrix, &max_length, n))
+    {
+        Cleanup(context, commandQueue, program, kernel, mem_objects);
+        return 1;
+    }
+
+    // Set the kernel arguments (matrix_out, matrix_in)
+    errNum = clSetKernelArg(kernel, 0, sizeof(cl_mem), &mem_objects[0]);
+    errNum |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &mem_objects[1]);
+    errNum |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &mem_objects[2]);
+    if (errNum != CL_SUCCESS)
+    {
+        std::cerr << "Error setting kernel arguments." << std::endl;
+        Cleanup(context, commandQueue, program, kernel, mem_objects);
+        return 1;
+    }
+
+    size_t globalWorkSize[1] = { (size_t)n * (size_t)n };
+    size_t localWorkSize[1] = { 1 };
+
+    // Queue the kernel up for execution across the array
+    errNum = clEnqueueNDRangeKernel(commandQueue, kernel, 1, NULL,
+                                    globalWorkSize, localWorkSize,
+                                    0, NULL, NULL);
+    if (errNum != CL_SUCCESS)
+    {
+        std::cerr << "Error queuing kernel for execution." << std::endl;
+        Cleanup(context, commandQueue, program, kernel, mem_objects);
+        return 1;
+    }
+
+    // Read the output buffer back to the Host
+    errNum = clEnqueueReadBuffer(commandQueue, mem_objects[1], CL_TRUE,
+                                 0, 64 * sizeof(float), matrix_out,
+                                 0, NULL, NULL);
+    
+    if (errNum != CL_SUCCESS)
+    {
+        std::cerr << "Error reading result buffer." << std::endl;
+        Cleanup(context, commandQueue, program, kernel, mem_objects);
+        return 1;
+    }
+
+    // Output the result buffer
+    std::cout << "Model with removed edges longer than max_length:" << std::endl;
+    for (int i = 0; i < n; i++)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            std::cout << matrix_out[i * n + j] << " ";
+        }
+        std::cout << std::endl;
+    }
+    std::cout << std::endl;
+    std::cout << "Executed program succesfully." << std::endl;
+    Cleanup(context, commandQueue, program, kernel, mem_objects);
+    
 
     return 0;
 }
