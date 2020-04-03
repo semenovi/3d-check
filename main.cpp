@@ -2,52 +2,13 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include "OBJ_Loader.h"
 
 #ifdef __APPLE__
 #include <OpenCL/cl.h>
 #else
 #include <CL/cl.h>
 #endif
-
-void write_model(std::string file_name, cl_int n, cl_float*adjacency_matrix)
-{
-    std::ofstream output_stream(file_name, std::ios::binary);
-
-    if (!output_stream.is_open()) {
-        std::cerr << "Failed to open file to write: " << file_name << std::endl;
-        return;
-    }
-
-    output_stream << n << ' ';
-
-    for (cl_int i = 0; i < n; i++)
-    {
-        output_stream << adjacency_matrix[i] << ' ';
-    }
-}
-
-cl_float *read_model(std::string file_name)
-{
-    std::ifstream input_stream(file_name, std::ios::binary);
-
-    if (!input_stream.is_open())
-    {
-        std::cerr << "Failed to open file for reading: " << file_name << std::endl;
-        return NULL;
-    }
-
-    cl_int n = 0;
-    input_stream >> n;
-        
-    cl_float* adjacency_matrix = new cl_float[n];
-    cl_int i = 0;
-    while (input_stream.good()) {
-        input_stream >> adjacency_matrix[i];
-        i++;
-    }
-    
-    return adjacency_matrix;
-}
 
 ///
 //  Create an OpenCL context on the first available platform using
@@ -195,21 +156,31 @@ cl_program CreateProgram(cl_context context, cl_device_id device, const char* fi
 
 ///
 //  Create memory objects used as the arguments to the kernel
-//  The kernel takes three arguments: matrix_out (output), matrix_in (input)
-//  and max_length (input)
+//  The kernel takes four arguments: triangles_array, verticles_array,
+//  triangles_size, verticles_size - input;
+//  distances - output
 //
-bool create_mem_objects(cl_context context, cl_mem mem_objects[3],
-                        cl_float* matrix_in, cl_float* max_length, cl_int n)
+bool create_mem_objects(cl_context context, cl_mem mem_objects[5],
+    cl_uint3* triangles_array, cl_float3* verticles_array,
+    size_t *triangles_size, size_t *verticles_size,
+    cl_float3* distances)
 {
-    cl_int size = n * n;
     mem_objects[0] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                                    sizeof(cl_float) * size, matrix_in, NULL);
-    mem_objects[1] = clCreateBuffer(context, CL_MEM_READ_WRITE,
-                                    sizeof(cl_float) * size, NULL, NULL);
+        sizeof(cl_uint3) * (*triangles_size), triangles_array, NULL);
+    mem_objects[1] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        sizeof(cl_float3) * (*verticles_size), verticles_array, NULL);
     mem_objects[2] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                                    sizeof(cl_int), max_length, NULL);
+        sizeof(size_t), triangles_size, NULL);
+    mem_objects[3] = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        sizeof(size_t), verticles_size, NULL);
+    mem_objects[4] = clCreateBuffer(context, CL_MEM_WRITE_ONLY | CL_MEM_COPY_HOST_PTR,
+        sizeof(cl_float3) * (*triangles_size), distances, NULL);
 
-    if (mem_objects[0] == NULL || mem_objects[1] == NULL || mem_objects[2] == NULL)
+    bool check = true;
+    for (int i = 0; i < 5; i++)
+        if (mem_objects[i] == NULL)
+            check = false;
+    if (!check)
     {
         std::cerr << "Error creating memory objects" << std::endl;
         return false;
@@ -222,9 +193,9 @@ bool create_mem_objects(cl_context context, cl_mem mem_objects[3],
 //  Cleanup any created OpenCL resources
 //
 void Cleanup(cl_context context, cl_command_queue commandQueue,
-             cl_program program, cl_kernel kernel, cl_mem memObjects[2])
+             cl_program program, cl_kernel kernel, cl_mem *memObjects)
 {
-    for (int i = 0; i < 3; i++)
+    for (int i = 0; i < 5; i++)
     {
         if (memObjects[i] != 0)
             clReleaseMemObject(memObjects[i]);
@@ -245,32 +216,12 @@ void Cleanup(cl_context context, cl_command_queue commandQueue,
 
 int main(int argc, char** argv)
 {
-    // uncomment to write file
-    /*
-    std::string input_file("3d_model.in");
-    cl_int n = 8;
-    cl_float* adjacency_matrix = new cl_float[n * n]
-    {
-            0.0, 3.0, 5.0, 4.0, 3.0, 4.0, 0.0, 0.0,
-            3.0, 0.0, 4.0, 0.0, 0.0, 3.0, 4.0, 0.0,
-            5.0, 4.0, 0.0, 3.0, 0.0, 0.0, 3.0, 4.0,
-            4.0, 0.0, 3.0, 0.0, 4.0, 0.0, 0.0, 3.0,
-            3.0, 0.0, 0.0, 4.0, 0.0, 3.0, 5.0, 4.0,
-            4.0, 3.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0,
-            0.0, 4.0, 3.0, 0.0, 5.0, 4.0, 0.0, 3.0,
-            0.0, 0.0, 4.0, 3.0, 4.0, 0.0, 3.0, 0.0
-    };
-    write_model("3d_model.in", n * n, adjacency_matrix);
-    */
-
-    // uncomment to execute
-    
     cl_context context = 0;
     cl_command_queue commandQueue = 0;
     cl_program program = 0;
     cl_device_id device = 0;
     cl_kernel kernel = 0;
-    cl_mem mem_objects[3] = { 0, 0, 0 };
+    cl_mem mem_objects[5] = { 0, 0, 0, 0, 0 };
     cl_int errNum;
 
     // Create an OpenCL context on first available platform
@@ -299,7 +250,7 @@ int main(int argc, char** argv)
     }
 
     // Create OpenCL kernel
-    kernel = clCreateKernel(program, "shorter_than", NULL);
+    kernel = clCreateKernel(program, "find_distances", NULL);
     if (kernel == NULL)
     {
         std::cerr << "Failed to create kernel" << std::endl;
@@ -307,44 +258,59 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // Initialize Loader
+    objl::Loader Loader;
+
+    // Load .obj File
+    bool loadout = Loader.LoadFile("box_stack.obj");
+    if (!loadout)
+    {
+        std::cerr << "Failed to load File. May have failed to find it or it was not an .obj file." << std::endl;
+        return 1;
+    }
+
+    size_t triangles_number = Loader.LoadedIndices.size() / 3;
+    size_t verticles_number = Loader.LoadedVertices.size();
+    cl_uint3* triangles_array = new cl_uint3[triangles_number];
+    cl_int idx = 0;
+    for (int i = 0; i < Loader.LoadedIndices.size(); i += 3)
+    {
+        idx = i / 3;
+        triangles_array[idx] =
+        {
+            Loader.LoadedIndices[i],
+            Loader.LoadedIndices[i + 1],
+            Loader.LoadedIndices[i + 2]
+        };
+    }
+    cl_float3* verticles_array = new cl_float3[verticles_number * 3];
+    for (int i = 0; i < verticles_number; i++)
+    {
+        verticles_array[i] =
+        {
+            Loader.LoadedVertices[i].Position.X,
+            Loader.LoadedVertices[i].Position.Y,
+            Loader.LoadedVertices[i].Position.Z
+        };
+    }
+    cl_float3* distances = new cl_float3[triangles_number];
+    
     // Create memory objects that will be used as arguments to
     // kernel.  First create host memory arrays that will be
     // used to store the arguments to the kernel
-    
-    cl_int n = 8;
-    cl_float* adjacency_matrix = new cl_float[n * n];
-    adjacency_matrix = read_model("3d_model.in");
-    cl_float* matrix_out = new cl_float[n * n];
-
-
-    // Write input
-    std::cout << "Input adjacency matrix:" << std::endl;
-    for (int i = 0; i < n; i++)
-    {
-        for (int j = 0; j < n; j++)
-        {
-            std::cout << adjacency_matrix[i * n + j] << " ";
-        }
-        std::cout << std::endl;
-    }
-    std::cout << std::endl;
-
-    // Ask the max_length
-    cl_float max_length = 0.0;
-    std::cout << "Enter max_length:" << std::endl << "> ";
-    std::cin >> max_length;
-    std::cout << std::endl;
-
-    if (!create_mem_objects(context, mem_objects, adjacency_matrix, &max_length, n))
+    if (!create_mem_objects(context, mem_objects, triangles_array, verticles_array,
+        &triangles_number, &verticles_number, distances))
     {
         Cleanup(context, commandQueue, program, kernel, mem_objects);
         return 1;
     }
 
-    // Set the kernel arguments (matrix_out, matrix_in)
+    // Set the kernel arguments
     errNum = clSetKernelArg(kernel, 0, sizeof(cl_mem), &mem_objects[0]);
     errNum |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &mem_objects[1]);
     errNum |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &mem_objects[2]);
+    errNum |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &mem_objects[3]);
+    errNum |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &mem_objects[4]);
     if (errNum != CL_SUCCESS)
     {
         std::cerr << "Error setting kernel arguments." << std::endl;
@@ -352,13 +318,13 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    size_t globalWorkSize[1] = { (size_t)n * (size_t)n };
+    size_t globalWorkSize[1] = { triangles_number };
     size_t localWorkSize[1] = { 1 };
 
     // Queue the kernel up for execution across the array
     errNum = clEnqueueNDRangeKernel(commandQueue, kernel, 1, NULL,
-                                    globalWorkSize, localWorkSize,
-                                    0, NULL, NULL);
+        globalWorkSize, localWorkSize,
+        0, NULL, NULL);
     if (errNum != CL_SUCCESS)
     {
         std::cerr << "Error queuing kernel for execution." << std::endl;
@@ -367,10 +333,10 @@ int main(int argc, char** argv)
     }
 
     // Read the output buffer back to the Host
-    errNum = clEnqueueReadBuffer(commandQueue, mem_objects[1], CL_TRUE,
-                                 0, 64 * sizeof(float), matrix_out,
-                                 0, NULL, NULL);
-    
+    errNum = clEnqueueReadBuffer(commandQueue, mem_objects[4], CL_TRUE,
+        0, triangles_number * sizeof(cl_float3), distances,
+        0, NULL, NULL);
+
     if (errNum != CL_SUCCESS)
     {
         std::cerr << "Error reading result buffer." << std::endl;
@@ -379,19 +345,14 @@ int main(int argc, char** argv)
     }
 
     // Output the result buffer
-    std::cout << "Model with removed edges longer than max_length:" << std::endl;
-    for (int i = 0; i < n; i++)
-    {
-        for (int j = 0; j < n; j++)
-        {
-            std::cout << matrix_out[i * n + j] << " ";
-        }
-        std::cout << std::endl;
-    }
+    std::cout << "Size of an edges:" << std::endl;
+    for (int i = 0; i < triangles_number; i++)
+        std::cout << distances[i].x << ' ' << distances[i].y << ' ' << distances[i].z << ' ' << " " << std::endl;
     std::cout << std::endl;
     std::cout << "Executed program succesfully." << std::endl;
     Cleanup(context, commandQueue, program, kernel, mem_objects);
+    delete[] triangles_array;
+    delete[] verticles_array;
     
-
     return 0;
 }

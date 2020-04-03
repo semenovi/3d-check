@@ -41,12 +41,17 @@ set(TARGET_SRC
 	kernel.cl
 	)
 
-add_executable(${PROJECT_NAME} ${TARGET_SRC})
+set(TARGET_HEADERS
+	OBJ_Loader.h
+	)
+
+add_executable(${PROJECT_NAME} ${TARGET_SRC} ${TARGET_HEADERS})
 target_link_libraries(${PROJECT_NAME} ${OPENCL_LIBRARIES})
 
 include_directories(${OPENCL_INCLUDE_DIRS})
 include_directories("${CMAKE_SOURCE_DIR}/khronos")
 
 configure_file(kernel.cl ${CMAKE_CURRENT_BINARY_DIR}/kernel.cl COPYONLY)
+configure_file(box_stack.obj ${CMAKE_CURRENT_BINARY_DIR}/box_stack.obj COPYONLY)
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
