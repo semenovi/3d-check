@@ -11,6 +11,17 @@ find_package(OpenCL REQUIRED)
 FIND_PATH(OPENCL_INCLUDE_DIRS CL/cl.h)
 FIND_PATH(_OPENCL_CPP_INCLUDE_DIRS CL/cl.hpp)
 
+FIND_PATH(GLEW_INCLUDE_DIRS GL/glew.h)
+FIND_PATH(FREEGLUT_INCLUDE_DIRS GL/glut.h)
+
+FIND_PATH(GLEW_LIB_DIRS glew32.lib)
+FIND_PATH(FREEGLUT_LIB_DIRS freeglut.lib)
+
+link_directories(${GLEW_LIB_DIRS} ${FREEGLUT_LIB_DIRS})
+
+FIND_LIBRARY(GLEW_LIBRARIES glew32.lib)
+FIND_LIBRARY(FREEGLUT_LIBRARIES freeglut.lib)
+
 # The AMD SDK currently installs both x86 and x86_64 libraries
 # This is only a hack to find out architecture
 IF( ${CMAKE_SYSTEM_PROCESSOR} STREQUAL "AMD64" )
@@ -46,12 +57,15 @@ set(TARGET_HEADERS
 	)
 
 add_executable(${PROJECT_NAME} ${TARGET_SRC} ${TARGET_HEADERS})
-target_link_libraries(${PROJECT_NAME} ${OPENCL_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} ${OPENCL_LIBRARIES} ${GLEW_LIBRARIES} ${FREEGLUT_LIBRARIES})
 
-include_directories(${OPENCL_INCLUDE_DIRS})
+include_directories(${OPENCL_INCLUDE_DIRS} ${GLEW_INCLUDE_DIRS} ${FREEGLUT_INCLUDE_DIRS})
+
 include_directories("${CMAKE_SOURCE_DIR}/khronos")
 
 configure_file(kernel.cl ${CMAKE_CURRENT_BINARY_DIR}/kernel.cl COPYONLY)
 configure_file(box_stack.obj ${CMAKE_CURRENT_BINARY_DIR}/box_stack.obj COPYONLY)
+configure_file(dll/freeglut.dll ${CMAKE_CURRENT_BINARY_DIR}/freeglut.dll COPYONLY)
+configure_file(dll/glew32.dll ${CMAKE_CURRENT_BINARY_DIR}/glew32.dll COPYONLY)
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
