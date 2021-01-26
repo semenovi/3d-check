@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.8)
 
-set(PROJECT_NAME 3d_check)
+set(PROJECT_NAME 3d-check)
 
 project(${PROJECT_NAME})
 
