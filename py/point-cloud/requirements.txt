@@ -4,3 +4,5 @@ numpy
 scipy
 open3d
 PyQt5
+vtk
+pywavefront
