@@ -1,0 +1,6 @@
+pip==22.0.4
+setuptools==58.1.0
+numpy
+scipy
+open3d
+PyQt5
