@@ -1,5 +1,5 @@
 pip==22.0.4
-setuptools==58.1.0
+setuptools==65.5.1
 numpy
 scipy
 open3d
