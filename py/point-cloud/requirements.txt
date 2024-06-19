@@ -1,16 +1,5 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
->>>>>>> origin/dependabot/pip/py/point-cloud/pip-23.3
-pip==23.3
-setuptools==58.1.0
->>>>>>> origin/dependabot/pip/py/point-cloud/pip-23.3
-=======
 pip==22.0.4
 setuptools==65.5.1
->>>>>>> origin/dependabot/pip/py/point-cloud/setuptools-65.5.1
 numpy
 open3d
 vtk
