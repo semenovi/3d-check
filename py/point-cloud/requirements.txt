@@ -1,6 +1,9 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> origin/dependabot/pip/py/point-cloud/pip-23.3
 pip==23.3
 setuptools==58.1.0
 >>>>>>> origin/dependabot/pip/py/point-cloud/pip-23.3
