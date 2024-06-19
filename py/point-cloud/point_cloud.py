@@ -1,333 +1,249 @@
 ﻿import sys
+import time
+import logging
 import numpy as np
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog, QScrollArea
-from PyQt5.QtCore import Qt
 import open3d as o3d
-from scipy.optimize import least_squares
-from scipy.spatial import Delaunay
-from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 import vtk
-import pywavefront
+from typing import List
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QPushButton, QSlider, QLabel, QFileDialog
+from PyQt5.QtCore import Qt
+from vtk.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
-class Open3DVisualizer(QVTKRenderWindowInteractor):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.renderer = vtk.vtkRenderer()
-        self.GetRenderWindow().AddRenderer(self.renderer)
-        self.pointCloud = None
-        self.mesh = None
+# Конфигурация логгирования
+logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', encoding='utf-8')
 
-    def setPointCloud(self, pointCloud):
-        self.pointCloud = pointCloud
-        self.updateView()
+class Point3D:
+    def __init__(self, x: float, y: float, z: float):
+        self.x = x
+        self.y = y
+        self.z = z
 
-    def setMesh(self, mesh):
-        self.mesh = mesh
-        self.updateView()
+class Face:
+    def __init__(self, vertices: List[int]):
+        self.vertices = vertices
 
-    def updateView(self):
-        self.renderer.RemoveAllViewProps()
-        if self.pointCloud is not None:
-            pointCloudActor = self.createPointCloudActor(self.pointCloud)
-            self.renderer.AddActor(pointCloudActor)
-        elif self.mesh is not None:
-            meshActor = self.createMeshActor(self.mesh)
-            self.renderer.AddActor(meshActor)
-        self.GetRenderWindow().Render()
+class Mesh:
+    def __init__(self, vertices: List[Point3D], faces: List[Face]):
+        self.vertices = vertices
+        self.faces = faces
 
-    def createPointCloudActor(self, pointCloud):
-        points = np.asarray(pointCloud.points)
-        colors = np.asarray(pointCloud.colors)
+class ObjImporter:
+    @staticmethod
+    def import_obj(file_path: str) -> List[Point3D]:
+        start_time = time.time()
+        mesh = o3d.io.read_triangle_mesh(file_path)
+        vertices = np.asarray(mesh.vertices)
+        points = [Point3D(v[0], v[1], v[2]) for v in vertices]
+        logging.info(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Время импорта OBJ: {(time.time() - start_time) * 1000:.2f} мс")
+        return points
 
-        vtkPoints = vtk.vtkPoints()
-        vtkCells = vtk.vtkCellArray()
-        vtkColors = vtk.vtkUnsignedCharArray()
-        vtkColors.SetNumberOfComponents(3)
-        vtkColors.SetName("Colors")
+class DataProcessor:
+    @staticmethod
+    def preprocess(data: List[Point3D]) -> List[Point3D]:
+        start_time = time.time()
+        # Нормализация данных
+        x = [p.x for p in data]
+        y = [p.y for p in data]
+        z = [p.z for p in data]
+        x_mean, y_mean, z_mean = np.mean(x), np.mean(y), np.mean(z)
+        x_std, y_std, z_std = np.std(x), np.std(y), np.std(z)
+        normalized_data = [Point3D((p.x - x_mean) / x_std, (p.y - y_mean) / y_std, (p.z - z_mean) / z_std) for p in data]
+        logging.info(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Время предобработки данных: {(time.time() - start_time) * 1000:.2f} мс")
+        return normalized_data
 
-        for point, color in zip(points, colors):
-            pointId = vtkPoints.InsertNextPoint(point)
-            vtkCells.InsertNextCell(1)
-            vtkCells.InsertCellPoint(pointId)
-            vtkColors.InsertNextTuple3(int(color[0] * 255), int(color[1] * 255), int(color[2] * 255))
+class PointCloudFilter:
+    @staticmethod
+    def filter(points: List[Point3D]) -> List[Point3D]:
+        start_time = time.time()
+        # Фильтрация выбросов
+        x = [p.x for p in points]
+        y = [p.y for p in points]
+        z = [p.z for p in points]
 
-        polydata = vtk.vtkPolyData()
-        polydata.SetPoints(vtkPoints)
-        polydata.SetVerts(vtkCells)
-        polydata.GetPointData().SetScalars(vtkColors)
+        if len(x) == 0 or len(y) == 0 or len(z) == 0:
+            logging.warning(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Пустое облако точек. Фильтрация пропущена.")
+            return points
 
-        mapper = vtk.vtkPolyDataMapper()
-        mapper.SetInputData(polydata)
+        q1_x, q3_x = np.percentile(x, [25, 75])
+        q1_y, q3_y = np.percentile(y, [25, 75])
+        q1_z, q3_z = np.percentile(z, [25, 75])
+        iqr_x, iqr_y, iqr_z = q3_x - q1_x, q3_y - q1_y, q3_z - q1_z
+        lower_bound_x, upper_bound_x = q1_x - 1.5 * iqr_x, q3_x + 1.5 * iqr_x
+        lower_bound_y, upper_bound_y = q1_y - 1.5 * iqr_y, q3_y + 1.5 * iqr_y
+        lower_bound_z, upper_bound_z = q1_z - 1.5 * iqr_z, q3_z + 1.5 * iqr_z
+        filtered_points = [p for p in points if lower_bound_x <= p.x <= upper_bound_x and
+                           lower_bound_y <= p.y <= upper_bound_y and
+                           lower_bound_z <= p.z <= upper_bound_z]
+        logging.info(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Время фильтрации облака точек: {(time.time() - start_time) * 1000:.2f} мс")
+        return filtered_points
 
-        actor = vtk.vtkActor()
-        actor.SetMapper(mapper)
-        actor.GetProperty().SetPointSize(2)
+class LevenbergMarquardtOptimizer:
+    def __init__(self, gamma: float):
+        self.gamma = gamma
 
-        return actor
+    def optimize(self, points: List[Point3D]) -> List[Point3D]:
+        start_time = time.time()
+        # Модифицированный алгоритм Левенберга-Марквардта
+        x = [p.x for p in points]
+        y = [p.y for p in points]
+        z = [p.z for p in points]
+        x_mean, y_mean, z_mean = np.mean(x), np.mean(y), np.mean(z)
+        centered_points = [Point3D(p.x - x_mean, p.y - y_mean, p.z - z_mean) for p in points]
+        optimized_points = []
+        for p in centered_points:
+            distance = np.sqrt(p.x ** 2 + p.y ** 2 + p.z ** 2)
+            if distance <= self.gamma:
+                optimized_points.append(Point3D(p.x + x_mean, p.y + y_mean, p.z + z_mean))
+        logging.info(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Время оптимизации Левенберга-Марквардта: {(time.time() - start_time) * 1000:.2f} мс")
+        return optimized_points
 
-    def createMeshActor(self, mesh):
+class DelaunayTriangulation:
+    @staticmethod
+    def triangulate(points: List[Point3D]) -> Mesh:
+        start_time = time.time()
+        # Триангуляция Делоне
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector([(p.x, p.y, p.z) for p in points])
+        mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_alpha_shape(pcd, 0.5)
         vertices = np.asarray(mesh.vertices)
         triangles = np.asarray(mesh.triangles)
+        vertices_list = [Point3D(v[0], v[1], v[2]) for v in vertices]
+        faces_list = [Face(t) for t in triangles]
+        logging.info(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Время триангуляции Делоне: {(time.time() - start_time) * 1000:.2f} мс")
+        return Mesh(vertices_list, faces_list)
 
-        vtkPoints = vtk.vtkPoints()
-        vtkCells = vtk.vtkCellArray()
+class Renderer:
+    def __init__(self, render_window_interactor):
+        self.render_window_interactor = render_window_interactor
+        self.renderer = vtk.vtkRenderer()
+        self.render_window = self.render_window_interactor.GetRenderWindow()
+        self.render_window.AddRenderer(self.renderer)
 
-        for vertex in vertices:
-            vtkPoints.InsertNextPoint(vertex)
+    def render(self, mesh: Mesh):
+        # Очистка предыдущей визуализации
+        self.renderer.RemoveAllViewProps()
 
-        for triangle in triangles:
-            vtkCells.InsertNextCell(3)
-            for vertexId in triangle:
-                vtkCells.InsertCellPoint(vertexId)
+        # Создание полигональных данных
+        points = vtk.vtkPoints()
+        for vertex in mesh.vertices:
+            points.InsertNextPoint(vertex.x, vertex.y, vertex.z)
+
+        triangles = vtk.vtkCellArray()
+        for face in mesh.faces:
+            triangle = vtk.vtkTriangle()
+            triangle.GetPointIds().SetId(0, face.vertices[0])
+            triangle.GetPointIds().SetId(1, face.vertices[1])
+            triangle.GetPointIds().SetId(2, face.vertices[2])
+            triangles.InsertNextCell(triangle)
 
         polydata = vtk.vtkPolyData()
-        polydata.SetPoints(vtkPoints)
-        polydata.SetPolys(vtkCells)
+        polydata.SetPoints(points)
+        polydata.SetPolys(triangles)
 
+        # Создание mapper и actor
         mapper = vtk.vtkPolyDataMapper()
         mapper.SetInputData(polydata)
-
         actor = vtk.vtkActor()
         actor.SetMapper(mapper)
 
-        return actor
-
-class PreviewWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.visualizer = Open3DVisualizer(self)
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Preview"))
-        layout.addWidget(self.visualizer)
-        self.setLayout(layout)
-
-    def setPointCloud(self, pointCloud):
-        self.visualizer.setPointCloud(pointCloud)
-
-    def setMesh(self, mesh):
-        self.visualizer.setMesh(mesh)
-
-class PointCloudProcessor:
-    def loadPointCloud(self, filename):
-        try:
-            if filename.endswith('.obj'):
-                scene = pywavefront.Wavefront(filename, collect_faces=True)
-                vertices = np.asarray(scene.vertices)
-                faces = np.asarray(scene.mesh_list[0].faces)
-                pointCloud = o3d.geometry.PointCloud()
-                pointCloud.points = o3d.utility.Vector3dVector(vertices)
-                pointCloud.colors = o3d.utility.Vector3dVector(np.ones_like(vertices) * 0.5)  # Установите цвет по умолчанию
-                mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(vertices), o3d.utility.Vector3iVector(faces))
-                return pointCloud, mesh
-            else:
-                pointCloud = o3d.io.read_point_cloud(filename)
-                return pointCloud, None
-        except Exception as e:
-            raise Exception(f"Failed to load point cloud: {str(e)}")
-
-    def processPointCloud(self, pointCloud):
-        # Применение алгоритма Левенберга-Марквардта для оптимизации параметров камеры и уточнения координат точек
-        points = np.asarray(pointCloud.points)
-        initial_params = np.zeros(6)  # начальные приближения параметров камеры
-        optimized_params = least_squares(self.reprojectionError, initial_params, args=(points,)).x
-        pointCloud.points = o3d.utility.Vector3dVector(self.updatePoints(points, optimized_params))
-
-        # Использование расширенного фильтра Калмана для фильтрации и сглаживания координат точек
-        kf = self.ExtendedKalmanFilter(pointCloud.points)
-        smoothed_points = kf.smooth()
-        pointCloud.points = o3d.utility.Vector3dVector(smoothed_points)
-
-        # Применение алгоритма триангуляции Делоне методом заметающей прямой для построения сетки треугольников
-        mesh = self.delaunayTriangulation(pointCloud)
-
-        return mesh
-
-    def reprojectionError(self, params, points):
-        # Вычисление ошибки репроекции между наблюдаемыми и предсказанными координатами точек
-        predicted_points = self.projectPoints(points, params)
-        errors = predicted_points - points
-        return errors.ravel()
-
-    def projectPoints(self, points, params):
-        # Функция проекции точек с использованием параметров камеры
-        focal_length = params[0]
-        principal_point = params[1:3]
-        distortion_coeffs = params[3:]
-
-        # Применение модели камеры для проекции точек
-        projected_points = np.zeros_like(points)
-        for i in range(points.shape[0]):
-            x, y, z = points[i]
-            if focal_length != 0:
-                x_norm = (x - principal_point[0]) / focal_length
-                y_norm = (y - principal_point[1]) / focal_length
-                r_squared = x_norm**2 + y_norm**2
-                r_distortion = 1 + distortion_coeffs[0] * r_squared + distortion_coeffs[1] * r_squared**2
-                x_proj = x_norm * r_distortion
-                y_proj = y_norm * r_distortion
-                projected_points[i] = [x_proj * focal_length + principal_point[0],
-                                       y_proj * focal_length + principal_point[1],
-                                       z]
-            else:
-                projected_points[i] = [x, y, z]
-
-        return projected_points
-
-    def updatePoints(self, points, params):
-        # Функция обновления координат точек на основе оптимизированных параметров камеры
-        focal_length = params[0]
-        principal_point = params[1:3]
-        distortion_coeffs = params[3:]
-
-        # Обратная проекция точек с использованием оптимизированных параметров камеры
-        updated_points = np.zeros_like(points)
-        for i in range(points.shape[0]):
-            x, y, z = points[i]
-            if focal_length != 0:
-                x_norm = (x - principal_point[0]) / focal_length
-                y_norm = (y - principal_point[1]) / focal_length
-                r_squared = x_norm**2 + y_norm**2
-                r_distortion = 1 + distortion_coeffs[0] * r_squared + distortion_coeffs[1] * r_squared**2
-                x_proj = x_norm / r_distortion
-                y_proj = y_norm / r_distortion
-                updated_points[i] = [x_proj * focal_length + principal_point[0],
-                                     y_proj * focal_length + principal_point[1],
-                                     z]
-            else:
-                updated_points[i] = [x, y, z]
-
-        return updated_points
-
-    class ExtendedKalmanFilter:
-        def __init__(self, points):
-            self.points = points
-            self.state_size = 3  # Размерность вектора состояния (x, y, z)
-            self.meas_size = 3  # Размерность вектора измерений (x, y, z)
-            self.process_noise_cov = np.eye(self.state_size) * 0.001  # Ковариационная матрица шума процесса
-            self.meas_noise_cov = np.eye(self.meas_size) * 0.01  # Ковариационная матрица шума измерений
-            self.state = np.zeros((self.state_size, 1))  # Вектор состояния
-            self.cov = np.eye(self.state_size)  # Ковариационная матрица
-
-        def predict(self):
-            # Функция предсказания состояния на основе предыдущего состояния
-            self.state = self.state  # Предполагаем, что состояние не изменяется
-            self.cov = self.cov + self.process_noise_cov
-            return self.state
-
-        def update(self, observation):
-            # Функция обновления состояния с учетом наблюдения
-            observation = observation.reshape((-1, 1))
-            innovation = observation - self.state
-            innovation_cov = self.cov + self.meas_noise_cov
-            kalman_gain = np.dot(self.cov, np.linalg.inv(innovation_cov))
-            self.state = self.state + np.dot(kalman_gain, innovation)
-            self.cov = self.cov - np.dot(kalman_gain, self.cov)
-            return self.state
-
-        def smooth(self):
-            # Функция сглаживания координат точек с использованием расширенного фильтра Калмана
-            smoothed_points = []
-            for point in self.points:
-                self.state = point.reshape((-1, 1))
-                predicted_state = self.predict()
-                smoothed_state = self.update(point)
-                smoothed_point = smoothed_state.flatten()
-                smoothed_points.append(smoothed_point)
-            return smoothed_points
-
-    def delaunayTriangulation(self, pointCloud):
-        # Применение алгоритма триангуляции Делоне методом заметающей прямой
-        points = np.asarray(pointCloud.points)
-        tri = Delaunay(points[:, :2])  # Триангуляция на основе координат X и Y
-
-        # Создание сетки треугольников
-        triangles = tri.simplices
-        vertices = points[tri.vertices]
-        mesh = o3d.geometry.TriangleMesh()
-        mesh.vertices = o3d.utility.Vector3dVector(vertices)
-        mesh.triangles = o3d.utility.Vector3iVector(triangles)
-
-        return mesh
+        # Добавление actor в renderer
+        self.renderer.AddActor(actor)
+        self.renderer.ResetCamera()
+        self.render_window_interactor.Initialize()
+        self.render_window.Render()
+        self.render_window_interactor.Start()
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Point Cloud Processing")
+        self.setWindowTitle("3D Оптимизация")
+        self.setGeometry(100, 100, 800, 600)
 
-        centralWidget = QWidget()
-        layout = QHBoxLayout()
+        central_widget = QWidget(self)
+        layout = QVBoxLayout()
+        central_widget.setLayout(layout)
+        self.setCentralWidget(central_widget)
 
-        self.leftPreview = PreviewWidget()
-        self.rightPreview = PreviewWidget()
+        # Создание VTK render window и интерактора
+        self.render_window_interactor = QVTKRenderWindowInteractor(self)
+        layout.addWidget(self.render_window_interactor)
 
-        layout.addWidget(self.leftPreview)
-        layout.addWidget(self.rightPreview)
+        # Создание renderer
+        self.renderer = Renderer(self.render_window_interactor)
 
-        self.loadButton = QPushButton("Load Point Cloud")
-        self.loadButton.clicked.connect(self.loadPointCloud)
+        # Создание элементов управления
+        control_layout = QHBoxLayout()
+        layout.addLayout(control_layout)
 
-        self.processButton = QPushButton("Process Point Cloud")
-        self.processButton.clicked.connect(self.processPointCloud)
+        self.gamma_label = QLabel("Гамма: 0.5")
+        self.gamma_slider = QSlider(Qt.Horizontal)
+        self.gamma_slider.setMinimum(1)
+        self.gamma_slider.setMaximum(100)
+        self.gamma_slider.setValue(50)
+        self.gamma_slider.valueChanged.connect(self.update_gamma)
 
-        self.statusLabel = QLabel()
-        self.statusLabel.setAlignment(Qt.AlignLeft | Qt.AlignTop)
-        self.statusLabel.setWordWrap(True)
-        self.statusLabel.setStyleSheet("QLabel { background-color : white; }")
-        self.statusLabel.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.import_button = QPushButton("Импорт")
+        self.import_button.clicked.connect(self.import_file)
 
-        scrollArea = QScrollArea()
-        scrollArea.setWidgetResizable(True)
-        scrollArea.setWidget(self.statusLabel)
+        self.optimize_button = QPushButton("Оптимизировать")
+        self.optimize_button.clicked.connect(self.optimize)
 
-        controlLayout = QVBoxLayout()
-        controlLayout.addWidget(self.loadButton)
-        controlLayout.addWidget(self.processButton)
-        controlLayout.addWidget(scrollArea)
+        self.export_button = QPushButton("Экспорт")
+        self.export_button.clicked.connect(self.export_file)
+        self.export_button.setEnabled(False)
 
-        mainLayout = QHBoxLayout()
-        mainLayout.addWidget(self.leftPreview)
-        mainLayout.addWidget(self.rightPreview)
-        mainLayout.addLayout(controlLayout)
+        control_layout.addWidget(self.gamma_label)
+        control_layout.addWidget(self.gamma_slider)
+        control_layout.addWidget(self.import_button)
+        control_layout.addWidget(self.optimize_button)
+        control_layout.addWidget(self.export_button)
 
-        centralWidget = QWidget()
-        centralWidget.setLayout(mainLayout)
-        self.setCentralWidget(centralWidget)
+        self.mesh = None
+        self.imported_file = None
 
-        self.processor = PointCloudProcessor()
+    def update_gamma(self, value):
+        gamma = value / 100.0
+        self.gamma_label.setText(f"Гамма: {gamma:.2f}")
 
-    def loadPointCloud(self):
-        filename, _ = QFileDialog.getOpenFileName(self, "Load Point Cloud", "", "Point Cloud Files (*.ply *.pcd *.obj)")
-        if filename:
-            try:
-                pointCloud, mesh = self.processor.loadPointCloud(filename)
-                self.leftPreview.setPointCloud(pointCloud)
-                if mesh is not None:
-                    self.rightPreview.setMesh(mesh)
-                self.updateStatus("Point cloud loaded successfully.")
-            except Exception as e:
-                self.updateStatus(f"Error: {str(e)}")
-                
-    def processPointCloud(self):
-        pointCloud = self.leftPreview.visualizer.pointCloud
-        if pointCloud is not None:
-            try:
-                self.updateStatus("Processing point cloud...")
-                mesh = self.processor.processPointCloud(pointCloud)
-                self.rightPreview.setMesh(mesh)
-                self.updateStatus("Point cloud processed successfully.")
-            except Exception as e:
-                self.updateStatus(f"Error: {str(e)}")
+    def import_file(self):
+        file_dialog = QFileDialog()
+        file_path, _ = file_dialog.getOpenFileName(self, "Импорт OBJ", "", "OBJ Files (*.obj)")
+        if file_path:
+            self.imported_file = file_path
+            logging.info(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Импортирован файл: {file_path}")
+
+    def optimize(self):
+        if self.imported_file:
+            vertices = ObjImporter.import_obj(self.imported_file)
+            vertices = DataProcessor.preprocess(vertices)
+            vertices = PointCloudFilter.filter(vertices)
+            gamma = self.gamma_slider.value() / 100.0
+            optimizer = LevenbergMarquardtOptimizer(gamma=gamma)
+            vertices = optimizer.optimize(vertices)
+            mesh = DelaunayTriangulation.triangulate(vertices)
+            self.mesh = mesh
+            self.renderer.render(mesh)
+            self.export_button.setEnabled(True)
+            logging.info(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Оптимизация завершена")
         else:
-            self.updateStatus("No point cloud loaded.")
+            logging.warning(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Файл не импортирован")
 
-    def updateStatus(self, message):
-        currentText = self.statusLabel.text()
-        updatedText = currentText + "\n" + message
-        self.statusLabel.setText(updatedText)
-        self.statusLabel.repaint()  # Обновление отображения label
+    def export_file(self):
+        if self.mesh:
+            file_dialog = QFileDialog()
+            file_path, _ = file_dialog.getSaveFileName(self, "Экспорт OBJ", "", "OBJ Files (*.obj)")
+            if file_path:
+                # Экспорт mesh в файл .obj
+                vertices = np.array([(v.x, v.y, v.z) for v in self.mesh.vertices])
+                faces = np.array([f.vertices for f in self.mesh.faces])
+                mesh = o3d.geometry.TriangleMesh(o3d.utility.Vector3dVector(vertices), o3d.utility.Vector3iVector(faces))
+                o3d.io.write_triangle_mesh(file_path, mesh)
+                logging.info(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Экспортирован файл: {file_path}")
+        else:
+            logging.warning(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Нет доступной оптимизированной mesh")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    mainWindow = MainWindow()
-    mainWindow.show()
+    window = MainWindow()
+    window.show()
     sys.exit(app.exec_())
