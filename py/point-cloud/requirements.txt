@@ -1,8 +1,6 @@
 pip==22.0.4
 setuptools==65.5.1
 numpy
-scipy
 open3d
-PyQt5
 vtk
-pywavefront
+PyQt5
