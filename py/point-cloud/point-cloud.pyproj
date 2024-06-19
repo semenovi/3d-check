@@ -24,6 +24,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="point_cloud.py" />
+    <Compile Include="point_cloud_generator.py" />
+    <Compile Include="tests.py" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="requirements.txt" />
